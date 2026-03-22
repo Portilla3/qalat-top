@@ -26,7 +26,7 @@ SCRIPT_FILES = {
 }
 
 
-def _load_mod(script_key, wide_path, out_path):
+def _load_mod(script_key, wide_path, out_path, filtro_centro=None):
     """
     Carga un script como módulo Python sin ejecutar código de nivel superior
     que dependa de rutas de archivos.
@@ -64,12 +64,17 @@ def _load_mod(script_key, wide_path, out_path):
         exec(compile(src, '<qalat>', 'exec'), mod.__dict__)
     except SystemExit:
         pass
-    except Exception:
-        pass
+    except Exception as _e:
+        import traceback
+        print(f'[_load_mod] warning al cargar {script_key}: {_e}')
+        traceback.print_exc()
 
-    # Inyectar rutas correctas después de cargar
-    mod.__dict__['INPUT_FILE']  = wide_path
-    mod.__dict__['OUTPUT_FILE'] = out_path
+    # Inyectar rutas y variables correctas después de cargar
+    mod.__dict__['INPUT_FILE']       = wide_path
+    mod.__dict__['OUTPUT_FILE']      = out_path
+    mod.__dict__['FILTRO_CENTRO']    = filtro_centro
+    mod.__dict__['NOMBRE_SERVICIO']  = 'Servicio de Tratamiento'
+    mod.__dict__['PERIODO']          = ''
     mod.__dict__['auto_archivo_wide'] = lambda: wide_path
 
     return mod
@@ -107,12 +112,12 @@ def run_script(script_key, wide_path, filtro_centro=None):
             wb.save(out_path)
 
         elif script_key == 'pdf_caract':
-            mod = _load_mod(script_key, wide_path, out_path)
+            mod = _load_mod(script_key, wide_path, out_path, filtro_centro)
             R = mod.cargar_datos()
             mod.build_word(R)
 
         elif script_key == 'pdf_seg':
-            mod = _load_mod(script_key, wide_path, out_path)
+            mod = _load_mod(script_key, wide_path, out_path, filtro_centro)
             R = mod.cargar_datos()
             mod.build_word(R)
 
