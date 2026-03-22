@@ -167,24 +167,11 @@ def run_script(script_key, wide_path, filtro_centro=None):
 
         elif script_key in ('pptx_caract', 'pptx_seg'):
             import subprocess
-            src = open(str(PIPELINE_DIR / SCRIPT_FILES[script_key]), encoding='utf-8').read()
-
-            # Parchar rutas inyectables (igual que word)
-            src = src.replace(
-                'INPUT_FILE    = None   # runner inyecta la ruta real',
-                'INPUT_FILE = __import__("os").environ["QALAT_WIDE"]'
-            ).replace(
-                'OUTPUT_FILE   = None   # runner inyecta la ruta real',
-                'OUTPUT_FILE = __import__("os").environ["QALAT_OUT"]'
-            ).replace(
-                'FILTRO_CENTRO = None   # runner inyecta el filtro si aplica',
-                'FILTRO_CENTRO = __import__("os").environ.get("QALAT_CENTRO") or None'
-            )
 
             fd2, tmp_py = tempfile.mkstemp(suffix='.py', prefix='qs_pptx_')
             os.close(fd2)
-            with open(tmp_py, 'w', encoding='utf-8') as f:
-                f.write(src)
+            import shutil
+            shutil.copy(str(PIPELINE_DIR / SCRIPT_FILES[script_key]), tmp_py)
 
             env = os.environ.copy()
             env['QALAT_WIDE']   = wide_path
@@ -405,3 +392,47 @@ def run_paquetes_centros(wide_path, keys_sel=None, progress_cb=None):
     if not centros:
         raise ValueError('No se detectaron centros en la base Wide.')
 
+    n_centros = len(centros)
+    zip_buf = BytesIO()
+
+    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for i, centro in enumerate(centros):
+            slug = _slug(centro)
+            carpeta = f'{slug}/'
+
+            if progress_cb:
+                progress_cb(i, n_centros, centro)
+
+            # 1. Base Wide filtrada por centro
+            try:
+                fd_wide, wide_centro_path = tempfile.mkstemp(suffix='.xlsx', prefix='qalat_wide_')
+                os.close(fd_wide)
+                _filtrar_wide_centro(wide_path, centro, wide_centro_path)
+                with open(wide_centro_path, 'rb') as f:
+                    zf.writestr(f'{carpeta}BASE_Wide_{slug}.xlsx', f.read())
+            except Exception as e:
+                zf.writestr(f'{carpeta}ERROR_base_{slug}.txt', f'Error generando base: {e}')
+                wide_centro_path = wide_path  # fallback: usar wide completo
+            finally:
+                try: os.unlink(wide_centro_path)
+                except: pass
+
+            # 2. Reportes filtrados por centro
+            # Para reportes usamos wide_path completo + filtro_centro en run_script
+            for key in keys_sel:
+                out_fname, _ = OUTPUTS[key]
+                base_name = out_fname.rsplit('.', 1)[0]
+                ext       = out_fname.rsplit('.', 1)[1]
+                archivo_zip = f'{carpeta}{base_name}_{slug}.{ext}'
+                try:
+                    buf, _, _ = run_script(key, wide_path, filtro_centro=centro)
+                    zf.writestr(archivo_zip, buf.getvalue())
+                except Exception as e:
+                    zf.writestr(f'{carpeta}ERROR_{key}_{slug}.txt',
+                                f'Error generando {out_fname}: {e}')
+
+    if progress_cb:
+        progress_cb(n_centros, n_centros, 'listo')
+
+    zip_buf.seek(0)
+    return zip_buf

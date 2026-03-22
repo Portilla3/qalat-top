@@ -529,4 +529,16 @@ def build_pptx(d):
     footer(sl, pie_txt)
 
     prs.save(OUTPUT_FILE)
-    print(f'  ✓ PPT generado: {
+    print(f'  ✓ PPT generado: {OUTPUT_FILE}')
+
+# ══════════════════════════════════════════════════════════════════════════════
+if __name__ == '__main__':
+    print('='*60)
+    print('  PPTX Seguimiento TOP  v2.0  —  Iniciando...')
+    print('='*60)
+    d = cargar_datos()
+    print(f'  N={d["N"]}/{d["N_total"]} | {d["sust_top"]} | {NOMBRE_SERVICIO}')
+    build_pptx(d)
+    print(f'\n{"="*60}')
+    print(f'  ✅  LISTO  →  {OUTPUT_FILE}')
+    print(f'{"="*60}')
