@@ -14,7 +14,7 @@ from datetime import datetime, date
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pipeline.wide_top import procesar_wide
-from pipeline.runner   import run_script
+from pipeline.runner   import run_script, run_paquetes_centros
 
 NAVY='#1F3864'; MID='#2E75B6'; ACCENT='#00B0F0'
 ORANGE='#C8590A'; RED='#C00000'; GREEN='#538135'; WHITE='#FFFFFF'
@@ -425,6 +425,89 @@ if 'result' in st.session_state:
                 st.download_button(f'⬇️ {fmt}',data=o['buf'].getvalue(),
                     file_name=o['fname'],mime=o['mime'],use_container_width=True,key=dlkey)
             else: st.warning(f"⚠️ {o.get('error','Error')[:100]}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # DISTRIBUCIÓN POR CENTROS
+    # ══════════════════════════════════════════════════════════════════════════
+    if 'wide_path' in st.session_state and not filtro_centro_val:
+        st.markdown('---')
+        st.markdown('<div class="sec">📦 Distribución por centros</div>',
+                    unsafe_allow_html=True)
+
+        st.markdown(
+            '<div style="background:#EEF4FB;border-left:4px solid #2E75B6;'
+            'padding:.8rem 1.2rem;border-radius:6px;margin-bottom:1rem;">'
+            '<b>¿Qué genera este botón?</b><br>'
+            'Un archivo <b>.zip</b> con una carpeta por cada centro detectado en la base. '
+            'Cada carpeta incluye la base Wide filtrada + los reportes seleccionados. '
+            'El gobierno puede distribuir cada carpeta directamente al centro correspondiente.'
+            '</div>',
+            unsafe_allow_html=True
+        )
+
+        # Selector de reportes a incluir
+        st.markdown('**Selecciona qué incluir en cada paquete:**')
+        dc1, dc2, dc3 = st.columns(3)
+        with dc1:
+            d_ce  = st.checkbox('📋 Excel caracterización', value=True,  key='d_ce')
+            d_se  = st.checkbox('📋 Excel seguimiento',     value=True,  key='d_se')
+        with dc2:
+            d_pc  = st.checkbox('📄 Word caracterización',  value=True,  key='d_pc')
+            d_ps  = st.checkbox('📄 Word seguimiento',      value=True,  key='d_ps')
+        with dc3:
+            d_ppc = st.checkbox('📑 PPT caracterización',   value=False, key='d_ppc')
+            d_pps = st.checkbox('📑 PPT seguimiento',       value=False, key='d_pps')
+
+        keys_dist = [k for k, v in {
+            'caract_excel': d_ce, 'seg_excel':   d_se,
+            'pdf_caract':   d_pc, 'pdf_seg':     d_ps,
+            'pptx_caract':  d_ppc,'pptx_seg':    d_pps,
+        }.items() if v]
+
+        n_centros = len(centros_disponibles)
+        st.caption(f'Se generarán **{n_centros} carpetas** — una por cada centro detectado')
+
+        if st.button('📦 Generar paquetes por centro', use_container_width=True,
+                     key='btn_dist'):
+
+            wide_path_dist = st.session_state['wide_path']
+            status_box = st.empty()
+            prog_dist  = st.progress(0, text='Iniciando...')
+
+            def _cb(i, total, centro):
+                pct = i / total if total else 1
+                txt = f'Procesando centro {i+1}/{total}: {centro}' if centro != 'listo' \
+                      else '✅ ZIP generado'
+                prog_dist.progress(pct, text=txt)
+                status_box.info(txt)
+
+            try:
+                with st.spinner('Generando paquetes — esto puede tomar varios minutos...'):
+                    zip_buf = run_paquetes_centros(
+                        wide_path_dist,
+                        keys_sel=keys_dist,
+                        progress_cb=_cb
+                    )
+
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                zip_name  = f'QALAT_Paquetes_Centros_{today_str}.zip'
+
+                prog_dist.progress(1.0, text='✅ Listo')
+                status_box.success(
+                    f'✅ ZIP generado con {n_centros} carpetas · {len(keys_dist)} reportes por centro'
+                )
+
+                st.download_button(
+                    label=f'⬇️ Descargar ZIP ({n_centros} centros)',
+                    data=zip_buf.getvalue(),
+                    file_name=zip_name,
+                    mime='application/zip',
+                    use_container_width=True,
+                    key='dl_dist'
+                )
+
+            except Exception as e:
+                st.error(f'❌ Error generando paquetes: {e}')
 
 if not uploaded and 'result' not in st.session_state:
     st.markdown("""<div style="text-align:center;padding:3rem;color:#888;">
