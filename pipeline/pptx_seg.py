@@ -1,193 +1,87 @@
 #!/usr/bin/env python3
 """
-╔══════════════════════════════════════════════════════════════════════════════╗
-║   SCRIPT_TOP_Universal_PPTX_Seguimiento.py                                 ║
-║   Genera presentación PowerPoint de seguimiento TOP1 vs TOP2               ║
-║   6 slides · Compatible con cualquier país TOP                             ║
-║   Versión Universal 1.0                                                    ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                             ║
-║  CÓMO USAR LA PRÓXIMA VEZ:                                                 ║
-║  1. Abre un chat nuevo con Claude                                           ║
-║  2. Sube DOS archivos:                                                      ║
-║       • Este script: SCRIPT_TOP_Universal_PPTX_Seguimiento.py              ║
-║       • La base en formato Wide (generada por SCRIPT_TOP_Universal_Wide)   ║
-║  3. Escribe exactamente:                                                    ║
-║     "Ejecuta el script universal PPTX Seguimiento con esta base Wide"      ║
-║  4. Claude ajustará NOMBRE_SERVICIO y PERIODO según corresponda            ║
-║                                                                             ║
-║  SLIDES:                                                                    ║
-║    1. Portada                                                               ║
-║    2. Consumo sustancia principal (torta)                                  ║
-║    3. Promedio días de consumo TOP1 vs TOP2                                ║
-║    4. Cambio en consumo (barras apiladas) + tabla resumen                  ║
-║    5. Transgresión a la norma social                                       ║
-║    6. Salud, Calidad de Vida y Vivienda                                    ║
-║                                                                             ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+pptx_seg.py — v2.0 (Python puro, sin Node.js)
+Genera presentación PowerPoint de seguimiento TOP1 vs TOP2
+6 slides · Compatible con cualquier país TOP
 """
+import glob, os, unicodedata, io, warnings
+import pandas as pd
+import numpy as np
+import matplotlib; matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
+warnings.filterwarnings('ignore')
 
+# ── Rutas (inyectadas por runner) ─────────────────────────────────────────────
+INPUT_FILE    = None
+OUTPUT_FILE   = None
+SHEET_NAME    = 'Base Wide'
+FILTRO_CENTRO = None
+NOMBRE_SERVICIO = 'Servicio de Tratamiento'
+PERIODO         = ''
 
-import glob, os, unicodedata
+# ── Colores ───────────────────────────────────────────────────────────────────
+C_DARK  = RGBColor(0x1F, 0x38, 0x64)
+C_MID   = RGBColor(0x2E, 0x75, 0xB6)
+C_LIGHT = RGBColor(0xBD, 0xD7, 0xEE)
+C_ACC   = RGBColor(0x00, 0xB0, 0xF0)
+C_WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+C_GRAY  = RGBColor(0x59, 0x59, 0x59)
+MC_T1 = '#2E75B6'; MC_T2 = '#00B0F0'
+MC_ABS = '#1F3864'; MC_DIS = '#2E75B6'; MC_SC = '#9DC3E6'; MC_EMP = '#BDD7EE'
+PIE_COLS = ['#2E75B6','#1F3864','#4472C4','#9DC3E6','#00B0F0','#538135','#BFBFBF','#C00000','#ED7D31']
+
+SLIDE_W = Inches(10); SLIDE_H = Inches(5.625)
 
 def _norm(s):
     return unicodedata.normalize('NFD', str(s).lower()).encode('ascii','ignore').decode()
 
+_PAISES = {
+    'republica_dominicana':'República Dominicana','dominicana':'República Dominicana',
+    'honduras':'Honduras','panama':'Panamá','panam':'Panamá',
+    'el_salvador':'El Salvador','salvador':'El Salvador',
+    'mexico':'México','mexic':'México','ecuador':'Ecuador',
+    'peru':'Perú','argentina':'Argentina','colombia':'Colombia',
+    'chile':'Chile','bolivia':'Bolivia','paraguay':'Paraguay',
+    'uruguay':'Uruguay','venezuela':'Venezuela','guatemala':'Guatemala',
+    'costa_rica':'Costa Rica','costarica':'Costa Rica','nicaragua':'Nicaragua',
+}
+def _extraer_pais(fn):
+    f = _norm(str(fn).replace('.','_'))
+    for k,v in _PAISES.items():
+        if k in f: return v
+    return None
+
+def _detectar_pais(wide_file):
+    try:
+        rs = pd.read_excel(wide_file, sheet_name='Resumen', header=None)
+        for _, row in rs.iterrows():
+            for v in row.tolist():
+                p = _extraer_pais(str(v))
+                if p: return p
+    except: pass
+    return _extraer_pais(os.path.basename(wide_file))
+
 def auto_archivo_wide():
-    """Encuentra automáticamente la base Wide subida al chat"""
     candidatos = (
         glob.glob('/mnt/user-data/uploads/*Wide*.xlsx') +
         glob.glob('/mnt/user-data/uploads/*wide*.xlsx') +
         glob.glob('/mnt/user-data/uploads/TOP_Base*.xlsx') +
         glob.glob('/home/claude/TOP_Base_Wide.xlsx'))
-    if not candidatos:
-        raise FileNotFoundError(
-            "\n\u26a0  No se encontró la base Wide.\n"
-            "   Sube el archivo TOP_Base_Wide.xlsx junto con este script.")
-    print(f"  \u2192 Base Wide detectada: {os.path.basename(candidatos[0])}")
+    if not candidatos: raise FileNotFoundError('No se encontró la base Wide TOP.')
     return candidatos[0]
-
-# ══════════════════════════════════════════════════════════════════════════════
-# CONFIGURACIÓN — Claude ajusta NOMBRE_SERVICIO y PERIODO según corresponda
-# ══════════════════════════════════════════════════════════════════════════════
-
-INPUT_FILE      = auto_archivo_wide()   # ← detecta automáticamente
-SHEET_NAME      = 'Base Wide'
-OUTPUT_FILE     = '/home/claude/TOP_Presentacion_Seguimiento.pptx'
-# ── FILTRO OPCIONAL POR CENTRO ────────────────────────────────────────────────
-# Dejar en None para procesar TODOS los centros.
-# Poner el código exacto del centro para filtrar solo ese centro.
-# Ejemplos:
-#   FILTRO_CENTRO = None         ← todos los centros
-#   FILTRO_CENTRO = "HCHN01"     ← solo ese centro
-FILTRO_CENTRO = None
-# ─────────────────────────────────────────────────────────────────────────────
-
-NOMBRE_SERVICIO = 'Perú'                        # ← Claude ajusta
-PERIODO         = '2025 – 2026'                 # ← Claude ajusta
-
-# ══════════════════════════════════════════════════════════════════════════════
-import pandas as pd, numpy as np, json, subprocess, os, sys, warnings
-warnings.filterwarnings('ignore')
 
 def _es_positivo(valor):
     s = str(valor).strip().lower()
-    if s in ('sí', 'si'): return True
-    if s in ('no', 'no aplica', 'nunca', 'nan', ''): return False
+    if s in ('sí','si'): return True
+    if s in ('no','no aplica','nunca','nan',''): return False
     n = pd.to_numeric(valor, errors='coerce')
     return not pd.isna(n) and n > 0
 
-print('=' * 60)
-print('  SCRIPT_TOP_Universal_PPTX_Seguimiento  —  Iniciando...')
-print('=' * 60)
-
-# ── Carga ──────────────────────────────────────────────────────────────────
-print(f'\n→ Leyendo: {INPUT_FILE}')
-df = pd.read_excel(INPUT_FILE, sheet_name=SHEET_NAME, header=1)
-
-# Aplicar filtro de centro si corresponde
-_col_centro = next((c for c in df.columns if any(x in _norm(c) for x in
-                    ['codigo del centro', 'servicio de tratamiento',
-                     'centro/ servicio', 'codigo centro'])), None)
-if FILTRO_CENTRO and _col_centro:
-    n_antes = len(df)
-    df = df[df[_col_centro].astype(str).str.strip() == FILTRO_CENTRO].copy()
-    df = df.reset_index(drop=True)
-    print(f'  ⚑ Filtro activo: Centro = "{FILTRO_CENTRO}"')
-    print(f'    {n_antes} pacientes totales → {len(df)} del centro seleccionado')
-if FILTRO_CENTRO:
-    OUTPUT_FILE = f'/home/claude/TOP_Presentacion_Seguimiento_{FILTRO_CENTRO}.pptx'
-N_total = len(df)
-seg = df[df['Tiene_TOP2'] == 'Sí'].copy().reset_index(drop=True)
-N = len(seg)
-print(f'  Total pacientes:        {N_total}')
-print(f'  Con seguimiento (TOP2): {N}  ({round(N/N_total*100,1)}%)')
-
-# ── Tiempo de seguimiento (días entre TOP1 y TOP2) ──────────────────────────
-_fc1 = next((c for c in seg.columns if 'fecha entrevista' in c.lower() and c.endswith('_TOP1')), None)
-_fc2 = next((c for c in seg.columns if 'fecha entrevista' in c.lower() and c.endswith('_TOP2')), None)
-_seg_tiempo = {'mediana': None, 'media': None, 'min': None, 'max': None, 'n': 0}
-if _fc1 and _fc2:
-    _d1 = pd.to_datetime(seg[_fc1], errors='coerce')
-    _d2 = pd.to_datetime(seg[_fc2], errors='coerce')
-    _dias = (_d2 - _d1).dt.days
-    # Excluir valores atípicos (> 24 meses = 730 días) para rango y mediana
-    _dias_ok = _dias[(_dias >= 0) & (_dias <= 730)].dropna()
-    if len(_dias_ok) > 0:
-        _m = _dias_ok / 30.44
-        _seg_tiempo = {
-            'mediana': round(float(_m.median()), 1),
-            'media':   round(float(_m.mean()), 1),
-            'min':     round(float(_m.min()), 1),
-            'max':     round(float(_m.max()), 1),
-            'n':       len(_dias_ok),
-            'n_total': int(_dias.notna().sum())
-        }
-_med = _seg_tiempo['mediana']; _mn = _seg_tiempo['min']; _mx = _seg_tiempo['max']
-print(f'  Tiempo seguimiento: mediana={_med} meses  rango={_mn}–{_mx} meses  (N válido={_seg_tiempo["n"]})')
-
-# ── Detección dinámica de columnas ─────────────────────────────────────────
-def detectar_columnas(cols):
-    col_set = set(cols)
-    def par(c1):
-        if not c1: return (None, None)
-        c2 = c1.replace('_TOP1', '_TOP2')
-        return (c1, c2 if c2 in col_set else None)
-
-    sust_cols = []
-    for c in cols:
-        if c.endswith('_TOP1') and 'Total (0-28)' in c:
-            base = c.replace('_TOP1', '')
-            if base.startswith('1)'):
-                partes = base.split('>>')
-                if len(partes) >= 3:
-                    nombre = partes[-2].strip().split('(')[0].strip()
-                    c1, c2 = par(c)
-                    sust_cols.append((nombre, c1, c2))
-
-    tr_sn = []
-    for c in cols:
-        if c.endswith('_TOP1') and c.replace('_TOP1','').startswith('3)') and '>>' in c:
-            nombre = c.replace('_TOP1','').split('>>')[-1].strip()
-            c1, c2 = par(c)
-            tr_sn.append((nombre, c1, c2))
-
-    def find(conds):
-        for c in cols:
-            if not c.endswith('_TOP1'): continue
-            base = c.replace('_TOP1','')
-            if all(cond(base, c) for cond in conds):
-                return par(c)
-        return (None, None)
-
-    vif     = find([lambda b,c: b.startswith('4)'), lambda b,c: 'Violencia Intrafamiliar' in c, lambda b,c: 'Total (0-28)' in c])
-    sal_psi = find([lambda b,c: b.startswith('6)')])
-    sal_fis = find([lambda b,c: b.startswith('8)')])
-    cal_vid = find([lambda b,c: b.startswith('10)')])
-    viv1    = find([lambda b,c: '9)' in b, lambda b,c: 'estable' in c.lower()])
-    viv2    = find([lambda b,c: '9)' in b, lambda b,c: 'básicas' in c.lower()])
-    sust_pp = find([lambda b,c: b.startswith('2)'), lambda b,c: 'sustancia principal' in c.lower()])
-
-    print(f'  Sustancias: {[s[0] for s in sust_cols]}')
-    print(f'  Transgresión: {[t[0] for t in tr_sn]}')
-    return dict(sust_cols=sust_cols, tr_sn=tr_sn,
-                vif=vif, sal_psi=sal_psi, sal_fis=sal_fis, cal_vid=cal_vid,
-                viv1=viv1, viv2=viv2, sust_pp=sust_pp)
-
-DC = detectar_columnas(seg.columns.tolist())
-
-# ── Helpers ────────────────────────────────────────────────────────────────
-def pct(n, d): return round(n/d*100, 1) if d > 0 else 0
-def smean(col):
-    if not col or col not in seg.columns: return 0
-    v = pd.to_numeric(seg[col], errors='coerce')
-    return round(float(v.mean()), 1) if v.notna().sum() > 0 else 0
-def viv_pct(col):
-    if not col or col not in seg.columns: return 0
-    nv = int(seg[col].isin(['Sí','No']).sum()) or N
-    return pct(int((seg[col]=='Sí').sum()), nv)
-
-# ── Normalización sustancia principal ──────────────────────────────────────
 def norm_sust(s):
     if pd.isna(s) or str(s).strip() == '0': return None
     s = str(s).strip().lower()
@@ -202,373 +96,442 @@ def norm_sust(s):
     if any(x in s for x in ['metanfet','anfetam']): return 'Metanfetamina'
     return 'Otras'
 
-print('\n→ Calculando indicadores...')
-data = {}
+# ── Helpers PPT ───────────────────────────────────────────────────────────────
+def add_rect(slide, x, y, w, h, fill):
+    shape = slide.shapes.add_shape(1, Inches(x), Inches(y), Inches(w), Inches(h))
+    shape.fill.solid(); shape.fill.fore_color.rgb = fill
+    shape.line.fill.background()
+    return shape
 
-# Slide 2: Sustancia principal (torta)
-c1_sp, _ = DC['sust_pp']
-if c1_sp:
-    sr1 = seg[c1_sp].apply(norm_sust).dropna()
-    nv = len(sr1); vc = sr1.value_counts()
-    data['sust'] = [{'label': k, 'pct': round(v/nv*100, 1)} for k,v in vc.items()]
-    data['sust_top'] = data['sust'][0]['label'] if data['sust'] else '—'
-else:
-    data['sust'] = []; data['sust_top'] = '—'
+def add_txt(slide, text, x, y, w, h, size=11, bold=False, color=None,
+            align=PP_ALIGN.LEFT, italic=False):
+    txb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    txb.word_wrap = True
+    tf = txb.text_frame; tf.word_wrap = True
+    p = tf.paragraphs[0]; p.alignment = align
+    run = p.add_run(); run.text = str(text)
+    run.font.size = Pt(size); run.font.bold = bold; run.font.italic = italic
+    if color: run.font.color.rgb = color
+    return txb
 
-# Slide 3: Días de consumo TOP1 vs TOP2
-dias = []
-for lbl, c1, c2 in DC['sust_cols']:
-    v1 = pd.to_numeric(seg[c1], errors='coerce')
-    v2 = pd.to_numeric(seg[c2], errors='coerce') if c2 else pd.Series([np.nan]*N)
-    m1 = round(float(v1.mean()), 1) if v1.notna().sum() > 0 else 0
-    m2 = round(float(v2.mean()), 1) if (c2 and v2.notna().sum() > 0) else 0
-    if m1 > 0 or m2 > 0:
-        dias.append({'label': lbl, 'top1': m1, 'top2': m2})
-data['dias'] = dias
+def header(slide, titulo):
+    add_rect(slide, 0, 0, 10, 0.72, C_DARK)
+    add_rect(slide, 5.5, 0, 4.5, 0.72, C_MID)
+    add_txt(slide, titulo, 0.25, 0.05, 9.5, 0.62, size=18, bold=True, color=C_WHITE)
 
-# Slide 4: Cambio en consumo
-cambio = []
-for lbl, c1, c2 in DC['sust_cols']:
-    if not c2: continue
-    v1 = pd.to_numeric(seg[c1], errors='coerce').fillna(0)
-    v2 = pd.to_numeric(seg[c2], errors='coerce').fillna(0)
-    mask = v1 > 0; nc = int(mask.sum())
-    if nc < 2: continue
-    s1 = v1[mask]; s2 = v2[mask]
-    n_abs = int((s2==0).sum()); n_dis = int(((s2>0)&(s2<s1)).sum())
-    n_sc  = int((s2==s1).sum()); n_emp = int((s2>s1).sum())
-    p = lambda n: round(n/nc*100, 1)
-    cambio.append({'label': lbl, 'n_cons': nc,
-        'abs': p(n_abs), 'dis': p(n_dis), 'sin': p(n_sc), 'emp': p(n_emp),
-        'combo': round((n_abs+n_dis)/nc*100, 1)})
-data['cambio'] = cambio
+def footer(slide, txt):
+    add_txt(slide, txt, 0.25, 5.32, 9.5, 0.25, size=8, color=C_GRAY,
+            align=PP_ALIGN.CENTER, italic=True)
 
-# Slide 5: Transgresión
-tr_cols1 = [c1 for _,c1,_ in DC['tr_sn']]
-tr_cols2 = [c2 for _,_,c2 in DC['tr_sn']]
-vif_c1, vif_c2 = DC['vif']
+def fig_to_pptx(slide, fig, x, y, w, h):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=130, bbox_inches='tight', facecolor='white')
+    buf.seek(0); plt.close(fig)
+    slide.shapes.add_picture(buf, Inches(x), Inches(y), Inches(w), Inches(h))
 
-def has_tr(row, sn_cols, vif_col):
-    for c in sn_cols:
-        if c and _es_positivo(row.get(c, '')): return True
-    if vif_col:
-        v = pd.to_numeric(row.get(vif_col, np.nan), errors='coerce')
-        return not np.isnan(v) and v > 0
-    return False
+def _ax_style(ax, horiz=False):
+    ax.set_facecolor('white')
+    (ax.xaxis if horiz else ax.yaxis).grid(True, color='#E2E8F0', linewidth=0.6, zorder=0)
+    ax.set_axisbelow(True)
+    for sp in ['top','right']: ax.spines[sp].set_visible(False)
+    ax.spines['left'].set_color('#D0D0D0'); ax.spines['bottom'].set_color('#D0D0D0')
 
-tr1 = seg.apply(lambda r: int(has_tr(r, tr_cols1, vif_c1)), axis=1)
-tr2 = seg.apply(lambda r: int(has_tr(r, tr_cols2, vif_c2)), axis=1)
-data['transgTotal'] = {'top1': pct(int(tr1.sum()), N), 'top2': pct(int(tr2.sum()), N)}
+def div_v(slide, x):
+    line = slide.shapes.add_shape(1, Inches(x), Inches(0.78), Inches(0.02), Inches(4.85))
+    line.fill.solid(); line.fill.fore_color.rgb = RGBColor(0xD9,0xD9,0xD9)
+    line.line.fill.background()
 
-tipos = []
-for lbl, c1, c2 in DC['tr_sn']:
-    n1 = int(seg[c1].apply(_es_positivo).sum()) if c1 else 0
-    n2 = int(seg[c2].apply(_es_positivo).sum()) if c2 else 0
-    tipos.append({'label': lbl, 'top1': pct(n1,N), 'top2': pct(n2,N)})
-if vif_c1:
-    vif1_v = pd.to_numeric(seg[vif_c1], errors='coerce')
-    vif2_v = pd.to_numeric(seg[vif_c2], errors='coerce') if vif_c2 else pd.Series([np.nan]*N)
-    tipos.append({'label': 'VIF', 'top1': pct(int((vif1_v>0).sum()),N),
-                                   'top2': pct(int((vif2_v>0).sum()),N)})
-data['transgtipos'] = tipos
+# ── Detección de columnas ─────────────────────────────────────────────────────
+def detectar_columnas(cols):
+    col_set = set(cols)
+    def par(c1):
+        if not c1: return (None, None)
+        c2 = c1.replace('_TOP1','_TOP2')
+        return (c1, c2 if c2 in col_set else None)
 
-# Slide 6: Salud y Vivienda
-sal_psi_c1, sal_psi_c2 = DC['sal_psi']
-sal_fis_c1, sal_fis_c2 = DC['sal_fis']
-cal_vid_c1, cal_vid_c2 = DC['cal_vid']
-viv1_c1, viv1_c2 = DC['viv1']
-viv2_c1, viv2_c2 = DC['viv2']
+    sust_cols = []
+    for c in cols:
+        if c.endswith('_TOP1') and 'Total (0-28)' in c:
+            base = c.replace('_TOP1','')
+            if base.startswith('1)'):
+                partes = base.split('>>')
+                if len(partes) >= 3:
+                    nombre = partes[-2].strip().split('(')[0].strip()
+                    c1, c2 = par(c)
+                    sust_cols.append((nombre, c1, c2))
+    tr_sn = []
+    for c in cols:
+        if c.endswith('_TOP1') and c.replace('_TOP1','').startswith('3)') and '>>' in c:
+            nombre = c.replace('_TOP1','').split('>>')[-1].strip()
+            c1, c2 = par(c)
+            tr_sn.append((nombre, c1, c2))
 
-data['salud'] = [
-    {'label': 'Salud Psicológica', 'top1': smean(sal_psi_c1), 'top2': smean(sal_psi_c2)},
-    {'label': 'Salud Física',      'top1': smean(sal_fis_c1), 'top2': smean(sal_fis_c2)},
-    {'label': 'Calidad de Vida',   'top1': smean(cal_vid_c1), 'top2': smean(cal_vid_c2)},
-]
-data['vivienda'] = [
-    {'label': 'Lugar estable',       'top1': viv_pct(viv1_c1), 'top2': viv_pct(viv1_c2)},
-    {'label': 'Condiciones básicas', 'top1': viv_pct(viv2_c1), 'top2': viv_pct(viv2_c2)},
-]
-data['meta'] = {
-    'N': N, 'total': N_total, 'servicio': NOMBRE_SERVICIO,
-    'periodo': PERIODO, 'pct_seg': round(N/N_total*100, 1),
-    'seg_mediana': _seg_tiempo['mediana'],
-    'seg_min':     _seg_tiempo['min'],
-    'seg_max':     _seg_tiempo['max'],
-    'seg_n':       _seg_tiempo['n'],
-    'seg_n_total': _seg_tiempo.get('n_total', N)
-}
+    def find(kws):
+        for c in cols:
+            if not c.endswith('_TOP1'): continue
+            nc = _norm(c)
+            if all(k in nc for k in kws): return par(c)
+        return (None, None)
 
-print(f'  Sust. principal: {data["sust_top"]}')
-print(f'  Transgresión: TOP1={data["transgTotal"]["top1"]}% → TOP2={data["transgTotal"]["top2"]}%')
-if data['salud']:
-    print(f'  Salud psic:    TOP1={data["salud"][0]["top1"]} → TOP2={data["salud"][0]["top2"]}')
+    vif     = find(['4)','violencia','intrafamiliar','total'])
+    sal_psi = find(['6)'])
+    sal_fis = find(['8)'])
+    cal_vid = find(['10)'])
+    viv1    = find(['9)','estable'])
+    viv2    = find(['9)','basica'])
+    sust_pp = find(['2)','sustancia','principal'])
 
-# ── JSON intermedio ────────────────────────────────────────────────────────
-json_path = '/home/claude/_top_data.json'
-with open(json_path, 'w', encoding='utf-8') as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
+    return dict(sust_cols=sust_cols, tr_sn=tr_sn, vif=vif,
+                sal_psi=sal_psi, sal_fis=sal_fis, cal_vid=cal_vid,
+                viv1=viv1, viv2=viv2, sust_pp=sust_pp)
+
+# ── Carga y cálculo de datos ──────────────────────────────────────────────────
+def cargar_datos():
+    global NOMBRE_SERVICIO, PERIODO
+    _pais = _detectar_pais(INPUT_FILE)
+    NOMBRE_SERVICIO = _pais if _pais else 'Servicio de Tratamiento'
+
+    _periodo_auto = None
+    try:
+        _rs = pd.read_excel(INPUT_FILE, sheet_name='Resumen', header=None)
+        for _, _row in _rs.iterrows():
+            for _v in _row.tolist():
+                if 'Período' in str(_v) or 'periodo' in str(_v).lower(): continue
+                if '–' in str(_v) or (' ' in str(_v) and any(
+                        m in str(_v) for m in ['Enero','Feb','Mar','Abr','May','Jun',
+                                               'Jul','Ago','Sep','Oct','Nov','Dic','2024','2025','2026'])):
+                    _periodo_auto = str(_v).strip(); break
+            if _periodo_auto: break
+    except: pass
+    PERIODO = _periodo_auto if _periodo_auto else '2025'
+
+    df = pd.read_excel(INPUT_FILE, sheet_name=SHEET_NAME, header=1)
+    df.columns = [str(c) for c in df.columns]
+
+    _col_centro = next((c for c in df.columns if any(x in _norm(c) for x in
+                        ['codigo del centro','servicio de tratamiento',
+                         'centro/ servicio','codigo centro'])), None)
+    if FILTRO_CENTRO and _col_centro:
+        df = df[df[_col_centro].astype(str).str.strip()==FILTRO_CENTRO].copy().reset_index(drop=True)
+        _pl = _detectar_pais(INPUT_FILE)
+        NOMBRE_SERVICIO = f'{_pl}  —  Centro {FILTRO_CENTRO}' if _pl else f'Centro {FILTRO_CENTRO}'
+
+    N_total = len(df)
+    seg = df[df['Tiene_TOP2']=='Sí'].copy().reset_index(drop=True)
+    N = len(seg)
+    DC = detectar_columnas(seg.columns.tolist())
+
+    def pct(n, d): return round(n/d*100,1) if d>0 else 0
+    def smean(col):
+        if not col or col not in seg.columns: return 0
+        v = pd.to_numeric(seg[col], errors='coerce')
+        return round(float(v.mean()),1) if v.notna().sum()>0 else 0
+    def viv_pct(col):
+        if not col or col not in seg.columns: return 0
+        nv = int(seg[col].isin(['Sí','No']).sum()) or N
+        return pct(int((seg[col]=='Sí').sum()), nv)
+
+    # Tiempo seguimiento
+    _fc1 = next((c for c in seg.columns if 'fecha entrevista' in c.lower() and c.endswith('_TOP1')), None)
+    _fc2 = next((c for c in seg.columns if 'fecha entrevista' in c.lower() and c.endswith('_TOP2')), None)
+    seg_tiempo = {'mediana':None,'min':None,'max':None,'n':0}
+    if _fc1 and _fc2:
+        _d1 = pd.to_datetime(seg[_fc1], errors='coerce')
+        _d2 = pd.to_datetime(seg[_fc2], errors='coerce')
+        _dias = (_d2-_d1).dt.days
+        _dias_ok = _dias[(_dias>=0)&(_dias<=730)].dropna()
+        if len(_dias_ok)>0:
+            _m = _dias_ok/30.44
+            seg_tiempo = {'mediana':round(float(_m.median()),1),
+                          'min':round(float(_m.min()),1),
+                          'max':round(float(_m.max()),1),'n':len(_dias_ok)}
+
+    # Sustancia principal
+    c1_sp, _ = DC['sust_pp']
+    sust = []; sust_top = '—'
+    if c1_sp:
+        sr1 = seg[c1_sp].apply(norm_sust).dropna()
+        nv = len(sr1); vc = sr1.value_counts()
+        sust = [{'label':k,'pct':round(v/nv*100,1),'n':int(v)} for k,v in vc.items()]
+        sust_top = sust[0]['label'] if sust else '—'
+
+    # Días consumo TOP1 vs TOP2
+    dias = []
+    for lbl, c1, c2 in DC['sust_cols']:
+        v1 = pd.to_numeric(seg[c1], errors='coerce')
+        v2 = pd.to_numeric(seg[c2], errors='coerce') if c2 else pd.Series([np.nan]*N)
+        m1 = round(float(v1.mean()),1) if v1.notna().sum()>0 else 0
+        m2 = round(float(v2.mean()),1) if (c2 and v2.notna().sum()>0) else 0
+        if m1>0 or m2>0: dias.append({'label':lbl,'top1':m1,'top2':m2})
+
+    # Cambio en consumo
+    cambio = []
+    for lbl, c1, c2 in DC['sust_cols']:
+        if not c2: continue
+        v1 = pd.to_numeric(seg[c1], errors='coerce').fillna(0)
+        v2 = pd.to_numeric(seg[c2], errors='coerce').fillna(0)
+        mask = v1>0; nc = int(mask.sum())
+        if nc<2: continue
+        s1=v1[mask]; s2=v2[mask]
+        n_abs=int((s2==0).sum()); n_dis=int(((s2>0)&(s2<s1)).sum())
+        n_sc=int((s2==s1).sum()); n_emp=int((s2>s1).sum())
+        p2 = lambda n: round(n/nc*100,1)
+        cambio.append({'label':lbl,'n':nc,
+                       'abs':p2(n_abs),'dis':p2(n_dis),'sin':p2(n_sc),'emp':p2(n_emp)})
+
+    # Transgresión
+    tr_cols1=[c1 for _,c1,_ in DC['tr_sn']]; tr_cols2=[c2 for _,_,c2 in DC['tr_sn']]
+    vif_c1, vif_c2 = DC['vif']
+    def has_tr(row, sn_cols, vif_col):
+        for c in sn_cols:
+            if c and _es_positivo(row.get(c,'')): return True
+        if vif_col:
+            v = pd.to_numeric(row.get(vif_col, np.nan), errors='coerce')
+            return not np.isnan(v) and v>0
+        return False
+    tr1 = seg.apply(lambda r: int(has_tr(r, tr_cols1, vif_c1)), axis=1)
+    tr2 = seg.apply(lambda r: int(has_tr(r, tr_cols2, vif_c2)), axis=1)
+    pct_tr1 = pct(int(tr1.sum()), N); pct_tr2 = pct(int(tr2.sum()), N)
+    tipos_tr = []
+    for lbl, c1, c2 in DC['tr_sn']:
+        n1 = int(seg[c1].apply(_es_positivo).sum()) if c1 else 0
+        n2 = int(seg[c2].apply(_es_positivo).sum()) if c2 else 0
+        tipos_tr.append({'label':lbl,'top1':pct(n1,N),'top2':pct(n2,N)})
+    if vif_c1:
+        vif1_v = pd.to_numeric(seg[vif_c1], errors='coerce')
+        vif2_v = pd.to_numeric(seg[vif_c2], errors='coerce') if vif_c2 else pd.Series([np.nan]*N)
+        tipos_tr.append({'label':'VIF','top1':pct(int((vif1_v>0).sum()),N),
+                         'top2':pct(int((vif2_v>0).sum()),N)})
+
+    # Salud y vivienda
+    sal_psi_c1,sal_psi_c2 = DC['sal_psi']; sal_fis_c1,sal_fis_c2 = DC['sal_fis']
+    cal_vid_c1,cal_vid_c2 = DC['cal_vid']; viv1_c1,viv1_c2 = DC['viv1']; viv2_c1,viv2_c2 = DC['viv2']
+    salud = [
+        {'label':'Salud Psicológica','top1':smean(sal_psi_c1),'top2':smean(sal_psi_c2)},
+        {'label':'Salud Física',     'top1':smean(sal_fis_c1),'top2':smean(sal_fis_c2)},
+        {'label':'Calidad de Vida',  'top1':smean(cal_vid_c1),'top2':smean(cal_vid_c2)},
+    ]
+    vivienda = [
+        {'label':'Lugar estable',      'top1':viv_pct(viv1_c1),'top2':viv_pct(viv1_c2)},
+        {'label':'Condiciones básicas','top1':viv_pct(viv2_c1),'top2':viv_pct(viv2_c2)},
+    ]
+
+    return dict(N=N, N_total=N_total, seg_tiempo=seg_tiempo, sust_top=sust_top,
+                sust=sust, dias=dias, cambio=cambio,
+                pct_tr1=pct_tr1, pct_tr2=pct_tr2, tipos_tr=tipos_tr,
+                salud=salud, vivienda=vivienda)
+
+# ── Gráficos ──────────────────────────────────────────────────────────────────
+def g_torta(d):
+    if not d['sust']: return None
+    labs=[s['label'] for s in d['sust']]; vals=[s['n'] for s in d['sust']]
+    fig,ax=plt.subplots(figsize=(5,4))
+    wedges,_,at=ax.pie(vals,labels=None,colors=PIE_COLS[:len(vals)],
+        autopct=lambda p:f'{p:.1f}%' if p>3 else '',startangle=140,pctdistance=0.72,
+        wedgeprops={'edgecolor':'white','linewidth':2})
+    for a in at: a.set_fontsize(9); a.set_color('white'); a.set_fontweight('bold')
+    ax.legend(wedges,[f'{l} (n={v})' for l,v in zip(labs,vals)],
+              loc='lower center',bbox_to_anchor=(0.5,-0.18),ncol=2,fontsize=8,frameon=False)
+    ax.set_aspect('equal'); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+def g_dias(d):
+    if not d['dias']: return None
+    labs=[x['label'] for x in d['dias']]
+    t1=[x['top1'] for x in d['dias']]; t2=[x['top2'] for x in d['dias']]
+    x=np.arange(len(labs)); ww=0.35
+    fig,ax=plt.subplots(figsize=(max(5,len(labs)*0.9),3.5))
+    b1=ax.bar(x-ww/2,t1,ww,color=MC_T1,label='Ingreso (TOP1)',zorder=3)
+    b2=ax.bar(x+ww/2,t2,ww,color=MC_T2,label='Seguimiento (TOP2)',zorder=3)
+    for bar,v in zip(list(b1)+list(b2),t1+t2):
+        if v>0: ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+0.2,
+                        f'{v}d',ha='center',va='bottom',fontsize=8,fontweight='bold',color='#333')
+    ax.set_xticks(x); ax.set_xticklabels(labs,fontsize=8)
+    ax.set_ylabel('Promedio días (0–28)',fontsize=8,color='#595959')
+    ax.legend(fontsize=8,frameon=False)
+    _ax_style(ax); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+def g_cambio(d):
+    if not d['cambio']: return None
+    labs=[x['label'] for x in d['cambio']]
+    abs_=[x['abs'] for x in d['cambio']]; dis_=[x['dis'] for x in d['cambio']]
+    sc_=[x['sin'] for x in d['cambio']]; emp_=[x['emp'] for x in d['cambio']]
+    x=np.arange(len(labs))
+    fig,ax=plt.subplots(figsize=(max(5,len(labs)*0.9),3.5))
+    ax.bar(x,abs_,color=MC_ABS,label='Abstinencia',zorder=3)
+    ax.bar(x,dis_,bottom=abs_,color=MC_DIS,label='Disminuyó',zorder=3)
+    ax.bar(x,sc_,bottom=[a+d for a,d in zip(abs_,dis_)],color=MC_SC,label='Sin cambio',zorder=3)
+    ax.bar(x,emp_,bottom=[a+d+s for a,d,s in zip(abs_,dis_,sc_)],color=MC_EMP,label='Empeoró',zorder=3)
+    for i,(a,d2,s,e) in enumerate(zip(abs_,dis_,sc_,emp_)):
+        y=0
+        for val,col in [(a,MC_ABS),(d2,MC_DIS),(s,MC_SC),(e,MC_EMP)]:
+            if val>9: ax.text(i,y+val/2,f'{val:.0f}%',ha='center',va='center',
+                              fontsize=7.5,color='white',fontweight='bold')
+            y+=val
+    ax.set_xticks(x); ax.set_xticklabels(labs,fontsize=8)
+    ax.set_ylim(0,115); ax.set_ylabel('% consumidores al ingreso',fontsize=8,color='#595959')
+    ax.legend(fontsize=7.5,frameon=False,ncol=2,loc='upper right')
+    _ax_style(ax); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+def g_transgresion(d):
+    fig,ax=plt.subplots(figsize=(3.5,3))
+    cats=['Ingreso\n(TOP1)','Seguimiento\n(TOP2)']
+    vals=[d['pct_tr1'],d['pct_tr2']]
+    bars=ax.bar(cats,vals,color=[MC_T1,MC_T2],width=0.5,zorder=3)
+    for bar,v in zip(bars,vals):
+        ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+0.8,
+                f'{v}%',ha='center',va='bottom',fontsize=12,fontweight='bold',color='#333')
+    ax.set_ylim(0,max(vals)*1.4 if max(vals)>0 else 1)
+    ax.set_ylabel('% personas',fontsize=8,color='#595959')
+    _ax_style(ax); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+def g_tipos_tr(d):
+    if not d['tipos_tr']: return None
+    labs=[t['label'] for t in d['tipos_tr']]
+    t1=[t['top1'] for t in d['tipos_tr']]; t2=[t['top2'] for t in d['tipos_tr']]
+    x=np.arange(len(labs)); ww=0.35
+    fig,ax=plt.subplots(figsize=(max(4,len(labs)*0.9),3))
+    b1=ax.bar(x-ww/2,t1,ww,color=MC_T1,zorder=3)
+    b2=ax.bar(x+ww/2,t2,ww,color=MC_T2,zorder=3)
+    for bar,v in zip(list(b1)+list(b2),t1+t2):
+        if v>0: ax.text(bar.get_x()+bar.get_width()/2,bar.get_height()+0.3,
+                        f'{v}%',ha='center',va='bottom',fontsize=8,fontweight='bold',color='#333')
+    ax.set_xticks(x); ax.set_xticklabels(labs,fontsize=8)
+    ax.legend([mpatches.Patch(color=MC_T1),mpatches.Patch(color=MC_T2)],
+              ['Ingreso','Seguimiento'],fontsize=8,frameon=False)
+    _ax_style(ax); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+def g_salud(d):
+    if not d['salud']: return None
+    labs=[s['label'] for s in d['salud']]
+    t1=[s['top1'] for s in d['salud']]; t2=[s['top2'] for s in d['salud']]
+    y=np.arange(len(labs)); ww=0.35
+    fig,ax=plt.subplots(figsize=(5,2.5))
+    b1=ax.barh(y-ww/2,t1,ww,color=MC_T1,label='Ingreso',zorder=3)
+    b2=ax.barh(y+ww/2,t2,ww,color=MC_T2,label='Seguimiento',zorder=3)
+    for bar,v in zip(list(b1)+list(b2),t1+t2):
+        ax.text(bar.get_width()+0.1,bar.get_y()+bar.get_height()/2,
+                str(v),va='center',fontsize=8,fontweight='bold',color='#333')
+    ax.set_yticks(y); ax.set_yticklabels(labs,fontsize=9)
+    ax.set_xlim(0,22); ax.axvline(x=10,color='#BFBFBF',linestyle='--',linewidth=0.8)
+    ax.legend(fontsize=8,frameon=False,loc='lower right')
+    _ax_style(ax,horiz=True); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+def g_vivienda(d):
+    if not d['vivienda']: return None
+    labs=[v['label'] for v in d['vivienda']]
+    t1=[v['top1'] for v in d['vivienda']]; t2=[v['top2'] for v in d['vivienda']]
+    y=np.arange(len(labs)); ww=0.35
+    fig,ax=plt.subplots(figsize=(4.5,2.5))
+    b1=ax.barh(y-ww/2,t1,ww,color=MC_T1,label='Ingreso',zorder=3)
+    b2=ax.barh(y+ww/2,t2,ww,color=MC_T2,label='Seguimiento',zorder=3)
+    for bar,v in zip(list(b1)+list(b2),t1+t2):
+        ax.text(bar.get_width()+1,bar.get_y()+bar.get_height()/2,
+                f'{v}%',va='center',fontsize=9,fontweight='bold',color='#333')
+    ax.set_yticks(y); ax.set_yticklabels(labs,fontsize=9)
+    ax.set_xlim(0,115)
+    ax.legend(fontsize=8,frameon=False,loc='lower right')
+    _ax_style(ax,horiz=True); fig.patch.set_facecolor('white'); fig.tight_layout()
+    return fig
+
+# ── Construcción del PPT ──────────────────────────────────────────────────────
+def build_pptx(d):
+    prs = Presentation()
+    prs.slide_width = SLIDE_W; prs.slide_height = SLIDE_H
+    blank = prs.slide_layouts[6]
+
+    titulo = f'Seguimiento TOP1 vs TOP2 · {NOMBRE_SERVICIO}'
+    pie_txt = f'N seguimiento = {d["N"]}  ·  {NOMBRE_SERVICIO}  ·  {PERIODO}'
+    pct_seg = round(d['N']/d['N_total']*100,1) if d['N_total']>0 else 0
+    st = d['seg_tiempo']
+
+    # ── SLIDE 1: PORTADA ──────────────────────────────────────────────────────
+    sl = prs.slides.add_slide(blank)
+    add_rect(sl, 0, 0, 3.8, 5.625, C_DARK)
+    add_rect(sl, 3.0, 0, 1.5, 5.625, C_MID)
+    add_txt(sl, 'Seguimiento', 0.25, 1.5, 3.2, 0.7, size=22, bold=True, color=C_WHITE)
+    add_txt(sl, 'TOP1 vs TOP2', 0.25, 2.3, 3.2, 0.5, size=12, color=C_LIGHT)
+    add_txt(sl, NOMBRE_SERVICIO.upper(), 0.25, 3.1, 3.2, 0.6, size=13, bold=True, color=C_WHITE)
+    add_txt(sl, PERIODO, 0.25, 3.75, 3.2, 0.4, size=11, color=C_LIGHT)
+    add_txt(sl, f'N ingreso: {d["N_total"]}  ·  Con seguimiento: {d["N"]} ({pct_seg}%)',
+            0.25, 4.3, 3.2, 0.4, size=10, color=C_LIGHT)
+    add_txt(sl, 'Monitoreo de Resultados\nde Tratamiento', 4.5, 2.2, 5.2, 1.0,
+            size=16, bold=True, color=C_DARK)
+    add_txt(sl, f'Sustancia principal: {d["sust_top"]}', 4.5, 3.3, 5.2, 0.4, size=11, color=C_MID)
+    if st['mediana']:
+        add_txt(sl, f'Tiempo mediano de seguimiento: {st["mediana"]} meses',
+                4.5, 3.75, 5.2, 0.4, size=10, color=C_GRAY)
+
+    # ── SLIDE 2: SUSTANCIA PRINCIPAL ──────────────────────────────────────────
+    sl = prs.slides.add_slide(blank)
+    header(sl, titulo)
+    add_txt(sl, f'SUSTANCIA PRINCIPAL AL SEGUIMIENTO  ·  {d["sust_top"]}',
+            0.25, 0.82, 9.5, 0.35, size=12, bold=True, color=C_MID)
+    fig_t = g_torta(d)
+    if fig_t: fig_to_pptx(sl, fig_t, 2.0, 1.2, 6.0, 4.0)
+    footer(sl, pie_txt)
+
+    # ── SLIDE 3: DÍAS DE CONSUMO ───────────────────────────────────────────────
+    sl = prs.slides.add_slide(blank)
+    header(sl, titulo)
+    add_txt(sl, 'PROMEDIO DE DÍAS DE CONSUMO · Ingreso vs Seguimiento (últimas 4 semanas)',
+            0.25, 0.82, 9.5, 0.35, size=11, bold=True, color=C_MID)
+    fig_d = g_dias(d)
+    if fig_d: fig_to_pptx(sl, fig_d, 0.5, 1.2, 9.0, 4.0)
+    footer(sl, pie_txt)
+
+    # ── SLIDE 4: CAMBIO EN CONSUMO ────────────────────────────────────────────
+    sl = prs.slides.add_slide(blank)
+    header(sl, titulo)
+    add_txt(sl, 'CAMBIO EN EL CONSUMO POR SUSTANCIA · % de consumidores al ingreso',
+            0.25, 0.82, 9.5, 0.35, size=11, bold=True, color=C_MID)
+    fig_cb = g_cambio(d)
+    if fig_cb: fig_to_pptx(sl, fig_cb, 0.5, 1.2, 9.0, 4.0)
+    footer(sl, pie_txt)
+
+    # ── SLIDE 5: TRANSGRESIÓN ─────────────────────────────────────────────────
+    sl = prs.slides.add_slide(blank)
+    header(sl, titulo)
+    div_v(sl, 4.95)
+    add_txt(sl, 'TRANSGRESIÓN A LA NORMA SOCIAL\nIngreso vs Seguimiento',
+            0.25, 0.82, 4.5, 0.6, size=13, bold=True, color=C_GRAY)
+    fig_to_pptx(sl, g_transgresion(d), 0.3, 1.5, 4.4, 3.6)
+    add_txt(sl, 'DISTRIBUCIÓN POR TIPO DE TRANSGRESIÓN',
+            5.15, 0.82, 4.6, 0.35, size=11, bold=True, color=C_GRAY)
+    fig_tt = g_tipos_tr(d)
+    if fig_tt: fig_to_pptx(sl, fig_tt, 5.1, 1.5, 4.65, 3.6)
+    footer(sl, pie_txt)
+
+    # ── SLIDE 6: SALUD Y VIVIENDA ─────────────────────────────────────────────
+    sl = prs.slides.add_slide(blank)
+    header(sl, titulo)
+    div_v(sl, 5.05)
+    add_txt(sl, 'AUTOPERCEPCIÓN DEL ESTADO DE SALUD\nY CALIDAD DE VIDA (escala 0–20)',
+            0.25, 0.82, 4.7, 0.6, size=11, bold=True, color=C_MID)
+    fig_sal = g_salud(d)
+    if fig_sal: fig_to_pptx(sl, fig_sal, 0.2, 1.5, 4.7, 3.8)
+    add_txt(sl, 'CONDICIONES DE VIVIENDA\n(% con condición Sí · TOP1 vs TOP2)',
+            5.3, 0.82, 4.5, 0.6, size=11, bold=True, color=C_MID)
+    fig_viv = g_vivienda(d)
+    if fig_viv: fig_to_pptx(sl, fig_viv, 5.2, 1.5, 4.5, 3.8)
+    footer(sl, pie_txt)
+
+    prs.save(OUTPUT_FILE)
+    print(f'  ✓ PPT generado: {OUTPUT_FILE}')
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NODE.JS — construye el PowerPoint con pptxgenjs
-# ══════════════════════════════════════════════════════════════════════════════
-JS_CODE = r"""
-const fs      = require('fs');
-const pptxgen = require('pptxgenjs');
-
-const data   = JSON.parse(fs.readFileSync('/home/claude/_top_data.json', 'utf8'));
-const OUTPUT = '""" + OUTPUT_FILE + r"""';
-
-const C_DARK  = '1F3864', C_MID = '2E75B6', C_LIGHT = 'BDD7EE';
-const C_TOP1  = '1F3864', C_TOP2 = '2E75B6';
-const C_TITLE = '0070C0', C_GRAY = '595959', C_WHITE = 'FFFFFF';
-// Paleta cambio en consumo (tonos azules)
-const C_ABS = '1F3864', C_DIS = '2E75B6', C_SC = '9DC3E6', C_EMP = 'BDD7EE';
-const PIE_COLORS = ['2E75B6','1F3864','4472C4','9DC3E6','00B0F0','538135','D9D9D9','C00000','ED7D31'];
-
-const pres = new pptxgen();
-pres.layout = 'LAYOUT_16x9';
-
-// Header estándar para slides de contenido
-function hdr(sl, txt) {
-  sl.addShape(pres.shapes.RECTANGLE, {x:0,y:0,w:10,h:0.72,fill:{color:C_DARK},line:{color:C_DARK}});
-  sl.addShape(pres.shapes.RECTANGLE, {x:5.5,y:0,w:4.5,h:0.72,
-    fill:{color:C_MID,transparency:40},line:{color:C_MID,transparency:40}});
-  sl.addText(txt, {x:0.25,y:0,w:9.5,h:0.72,
-    fontSize:22,bold:true,color:C_WHITE,fontFace:'Calibri',valign:'middle'});
-}
-const TITULO = `Resultados: Ingreso y Seguimiento · ${data.meta.servicio}`;
-
-// ── SLIDE 1: PORTADA ──────────────────────────────────────────────────────
-{
-  const sl = pres.addSlide(); sl.background = {color:'FFFFFF'};
-  // Panel izquierdo oscuro
-  sl.addShape(pres.shapes.RECTANGLE, {x:0,y:0,w:3.8,h:5.625,
-    fill:{color:C_DARK},line:{color:C_DARK}});
-  sl.addShape(pres.shapes.RECTANGLE, {x:3.0,y:0,w:1.5,h:5.625,
-    fill:{color:C_MID,transparency:60},line:{color:C_MID,transparency:60}});
-  // Texto panel izquierdo
-  sl.addText('Resultados', {x:0.25,y:1.8,w:3.0,h:0.7,
-    fontSize:24,bold:true,color:C_WHITE,fontFace:'Calibri'});
-  sl.addText('Monitoreo TOP', {x:0.25,y:2.55,w:3.0,h:0.55,
-    fontSize:14,color:C_LIGHT,fontFace:'Calibri'});
-  // Texto panel derecho
-  sl.addText([
-    {text:'TOP 1 - TOP 2', options:{breakLine:true}},
-    {text:'Ingreso y Seguimiento'}
-  ], {x:4.3,y:1.8,w:5.4,h:1.4,
-    fontSize:32,bold:true,color:C_GRAY,fontFace:'Calibri',align:'center',valign:'middle'});
-  sl.addText(data.meta.servicio.toUpperCase(), {x:4.3,y:3.3,w:5.4,h:0.45,
-    fontSize:18,bold:true,color:C_MID,fontFace:'Calibri',align:'center'});
-  sl.addText(data.meta.periodo, {x:4.3,y:3.8,w:5.4,h:0.35,
-    fontSize:13,color:C_MID,fontFace:'Calibri',align:'center',bold:true});
-  sl.addText(
-    `N = ${data.meta.N} pacientes con seguimiento (${data.meta.pct_seg}% del total)`,
-    {x:4.3,y:4.25,w:5.4,h:0.35,fontSize:11,color:'888888',fontFace:'Calibri',align:'center'});
-  if (data.meta.seg_mediana !== null) {
-    const rangoTxt = data.meta.seg_min !== null
-      ? `Mediana: ${data.meta.seg_mediana} meses  ·  Rango: ${data.meta.seg_min}–${data.meta.seg_max} meses`
-      : `Mediana tiempo de seguimiento: ${data.meta.seg_mediana} meses`;
-    sl.addText(rangoTxt,
-      {x:4.3,y:4.62,w:5.4,h:0.3,fontSize:9.5,color:'AAAAAA',fontFace:'Calibri',
-       align:'center',italic:true});
-  }
-}
-
-// ── SLIDE 2: SUSTANCIA PRINCIPAL (torta) ──────────────────────────────────
-{
-  const sl = pres.addSlide(); sl.background = {color:'FFFFFF'};
-  hdr(sl, TITULO);
-  sl.addText('CONSUMO SUSTANCIA PRINCIPAL AL INGRESO',
-    {x:1.5,y:0.82,w:7,h:0.38,
-     fontSize:14,bold:true,color:C_TITLE,fontFace:'Calibri',align:'center'});
-  if (data.sust.length > 0) {
-    sl.addChart(pres.charts.PIE, [{
-      name:'Sustancia',
-      labels: data.sust.map(s => s.label),
-      values: data.sust.map(s => s.pct),
-    }], {
-      x:1.3,y:1.28,w:7.4,h:4.1,
-      showPercent:true,showLabel:false,showLegend:true,legendPos:'b',legendFontSize:10,
-      dataLabelFontSize:11,
-      chartColors: PIE_COLORS.slice(0, data.sust.length),
-      chartArea:{fill:{color:'FFFFFF'}},
-      dataLabelColor:'FFFFFF',dataLabelPosition:'bestFit',
-    });
-  }
-}
-
-// ── SLIDE 3: DÍAS DE CONSUMO TOP1 vs TOP2 ────────────────────────────────
-{
-  const sl = pres.addSlide(); sl.background = {color:'FFFFFF'};
-  hdr(sl, TITULO);
-  sl.addText('PROMEDIO DE DÍAS DE CONSUMO EN LAS ÚLTIMAS 4 SEMANAS\nTOP 1 (Ingreso) vs TOP 2 (Seguimiento)',
-    {x:1.0,y:0.80,w:8,h:0.65,
-     fontSize:13,bold:true,color:C_TITLE,fontFace:'Calibri',align:'center'});
-  if (data.dias.length > 0) {
-    const labels = data.dias.map(d => d.label);
-    sl.addChart(pres.charts.BAR, [
-      {name:'Ingreso (TOP 1)',    labels, values:data.dias.map(d=>d.top1)},
-      {name:'Seguimiento (TOP 2)',labels, values:data.dias.map(d=>d.top2)},
-    ], {
-      x:0.8,y:1.5,w:8.4,h:3.9,barDir:'col',barGrouping:'clustered',
-      chartColors:[C_TOP1,C_TOP2],chartArea:{fill:{color:'FFFFFF'}},
-      showValue:true,dataLabelFontSize:11,dataLabelColor:'363636',
-      catAxisLabelColor:'363636',catAxisLabelFontSize:12,
-      valAxisLabelColor:'595959',valAxisLabelFontSize:10,
-      valAxisMaxVal:28,valAxisMinVal:0,
-      valGridLine:{color:'E2E8F0',size:0.5},catGridLine:{style:'none'},
-      showLegend:true,legendPos:'b',legendFontSize:11,
-    });
-  }
-}
-
-// ── SLIDE 4: CAMBIO EN CONSUMO (barras apiladas + tabla) ─────────────────
-{
-  const sl = pres.addSlide(); sl.background = {color:'FFFFFF'};
-  hdr(sl, TITULO);
-  sl.addText('CAMBIO EN EL CONSUMO POR SUSTANCIA  ·  Ingreso → Seguimiento',
-    {x:0.25,y:0.82,w:9.5,h:0.38,
-     fontSize:13,bold:true,color:C_TITLE,fontFace:'Calibri',align:'center'});
-  if (data.cambio.length > 0) {
-    const labels = data.cambio.map(d => d.label);
-    sl.addChart(pres.charts.BAR, [
-      {name:'Abstinencia', labels, values:data.cambio.map(d=>d.abs)},
-      {name:'Disminuyó',   labels, values:data.cambio.map(d=>d.dis)},
-      {name:'Sin cambios', labels, values:data.cambio.map(d=>d.sin)},
-      {name:'Empeoró',     labels, values:data.cambio.map(d=>d.emp)},
-    ], {
-      x:0.3,y:0.88,w:6.2,h:4.52,barDir:'col',barGrouping:'percentStacked',
-      chartColors:[C_ABS,C_DIS,C_SC,C_EMP],chartArea:{fill:{color:'FFFFFF'}},
-      showValue:true,dataLabelFormatCode:'0"%"',dataLabelFontSize:10,dataLabelColor:C_WHITE,
-      catAxisLabelColor:'363636',catAxisLabelFontSize:12,
-      valAxisLabelColor:'595959',valAxisLabelFontSize:9,
-      valGridLine:{color:'E2E8F0',size:0.5},catGridLine:{style:'none'},
-      showLegend:true,legendPos:'b',legendFontSize:10,
-    });
-    // Panel derecho: tabla resumen % abstinencia + disminuyó
-    sl.addText('Abstinencia o\nreducción al\nseguimiento',
-      {x:6.65,y:0.95,w:3.1,h:0.85,
-       fontSize:12,color:C_GRAY,fontFace:'Calibri',align:'center',valign:'top'});
-    const colW = 3.5 / data.cambio.length;
-    sl.addTable([
-      data.cambio.map(d => ({text:d.label,       options:{bold:true,fontSize:10,color:'363636',align:'center'}})),
-      data.cambio.map(d => ({text:`${d.combo}%`, options:{bold:true,fontSize:14,color:C_DARK,  align:'center'}})),
-    ], {
-      x:6.25,y:1.95,w:3.5,h:0.9,
-      border:{pt:0.5,color:'BDD7EE'},fill:{color:'EEF4FB'},
-      rowH:0.42, colW: data.cambio.map(() => colW),
-    });
-  }
-}
-
-// ── SLIDE 5: TRANSGRESIÓN ────────────────────────────────────────────────
-{
-  const sl = pres.addSlide(); sl.background = {color:'FFFFFF'};
-  hdr(sl, TITULO);
-  // Línea divisoria vertical
-  sl.addShape(pres.shapes.LINE, {x:4.95,y:0.78,w:0,h:4.85,
-    line:{color:'D9D9D9',width:1}});
-  sl.addText('Personas que cometieron alguna\ntransgresión a la norma social',
-    {x:0.25,y:0.82,w:4.5,h:0.65,
-     fontSize:13,bold:true,color:C_GRAY,fontFace:'Calibri',align:'left'});
-  sl.addText('Distribución por tipo de transgresión',
-    {x:5.1,y:0.82,w:4.7,h:0.65,
-     fontSize:13,bold:true,color:C_GRAY,fontFace:'Calibri',align:'center'});
-  const T = data.transgTotal;
-  // Gráfico general (2 barras: TOP1 y TOP2)
-  sl.addChart(pres.charts.BAR, [
-    {name:'TOP 1', labels:['Ingreso\n(TOP 1)','Seguimiento\n(TOP 2)'], values:[T.top1, null]},
-    {name:'TOP 2', labels:['Ingreso\n(TOP 1)','Seguimiento\n(TOP 2)'], values:[null,    T.top2]},
-  ], {
-    x:0.2,y:1.5,w:4.5,h:3.8,barDir:'col',barGrouping:'clustered',
-    chartColors:[C_TOP1,C_TOP2],chartArea:{fill:{color:'FFFFFF'}},
-    showValue:true,dataLabelFormatCode:'0"%"',dataLabelFontSize:14,
-    dataLabelColor:C_WHITE,dataLabelPosition:'inEnd',
-    catAxisLabelColor:'363636',catAxisLabelFontSize:12,
-    valAxisLabelColor:'595959',valAxisLabelFontSize:9,
-    valAxisMaxVal:100,valAxisNumFmt:'0"%"',
-    valGridLine:{color:'E2E8F0',size:0.5},catGridLine:{style:'none'},showLegend:false,
-  });
-  // Gráfico tipos (filtrar los que tengan al menos un valor > 0)
-  const tiposFilt = data.transgtipos.filter(d => d.top1 > 0 || d.top2 > 0);
-  const tiposUsar = tiposFilt.length > 0 ? tiposFilt : data.transgtipos;
-  sl.addChart(pres.charts.BAR, [
-    {name:'Ingreso (TOP 1)',    labels:tiposUsar.map(d=>d.label), values:tiposUsar.map(d=>d.top1)},
-    {name:'Seguimiento (TOP 2)',labels:tiposUsar.map(d=>d.label), values:tiposUsar.map(d=>d.top2)},
-  ], {
-    x:5.1,y:1.5,w:4.7,h:3.8,barDir:'col',barGrouping:'clustered',
-    chartColors:[C_TOP1,C_TOP2],chartArea:{fill:{color:'FFFFFF'}},
-    showValue:true,dataLabelFormatCode:'0"%"',dataLabelFontSize:11,dataLabelColor:'363636',
-    catAxisLabelColor:'363636',catAxisLabelFontSize:9,
-    valAxisLabelColor:'595959',valAxisLabelFontSize:9,
-    valAxisMaxVal:80,valAxisNumFmt:'0"%"',
-    valGridLine:{color:'E2E8F0',size:0.5},catGridLine:{style:'none'},
-    showLegend:true,legendPos:'b',legendFontSize:10,
-  });
-}
-
-// ── SLIDE 6: SALUD Y VIVIENDA ─────────────────────────────────────────────
-{
-  const sl = pres.addSlide(); sl.background = {color:'FFFFFF'};
-  hdr(sl, TITULO);
-  sl.addShape(pres.shapes.LINE, {x:5.05,y:0.78,w:0,h:4.85,
-    line:{color:'D9D9D9',width:1}});
-  sl.addText('AUTOPERCEPCIÓN DEL ESTADO DE SALUD\nY CALIDAD DE VIDA (escala 0–20)',
-    {x:0.25,y:0.82,w:4.7,h:0.65,
-     fontSize:11,bold:true,color:C_TITLE,fontFace:'Calibri',align:'left'});
-  sl.addText('CONDICIONES DE VIVIENDA\n(% con condición al Sí)',
-    {x:5.3,y:0.82,w:4.5,h:0.65,
-     fontSize:11,bold:true,color:C_TITLE,fontFace:'Calibri',align:'left'});
-  // Salud (barras horizontales agrupadas)
-  sl.addChart(pres.charts.BAR, [
-    {name:'Ingreso (TOP 1)',    labels:data.salud.map(d=>d.label), values:data.salud.map(d=>d.top1)},
-    {name:'Seguimiento (TOP 2)',labels:data.salud.map(d=>d.label), values:data.salud.map(d=>d.top2)},
-  ], {
-    x:0.2,y:1.5,w:4.6,h:3.8,barDir:'bar',barGrouping:'clustered',
-    chartColors:[C_TOP1,C_TOP2],chartArea:{fill:{color:'FFFFFF'}},
-    showValue:true,dataLabelFontSize:11,dataLabelColor:'363636',
-    catAxisLabelColor:'363636',catAxisLabelFontSize:11,
-    valAxisLabelColor:'595959',valAxisLabelFontSize:9,valAxisMaxVal:20,
-    valGridLine:{color:'E2E8F0',size:0.5},catGridLine:{style:'none'},
-    showLegend:true,legendPos:'b',legendFontSize:10,
-  });
-  // Vivienda (barras horizontales agrupadas)
-  sl.addChart(pres.charts.BAR, [
-    {name:'Ingreso (TOP 1)',    labels:data.vivienda.map(d=>d.label), values:data.vivienda.map(d=>d.top1)},
-    {name:'Seguimiento (TOP 2)',labels:data.vivienda.map(d=>d.label), values:data.vivienda.map(d=>d.top2)},
-  ], {
-    x:5.15,y:1.5,w:4.6,h:3.8,barDir:'bar',barGrouping:'clustered',
-    chartColors:[C_TOP1,C_TOP2],chartArea:{fill:{color:'FFFFFF'}},
-    showValue:true,dataLabelFormatCode:'0"%"',dataLabelFontSize:12,dataLabelColor:'363636',
-    catAxisLabelColor:'363636',catAxisLabelFontSize:11,
-    valAxisLabelColor:'595959',valAxisLabelFontSize:9,valAxisMaxVal:100,
-    valAxisNumFmt:'0"%"',
-    valGridLine:{color:'E2E8F0',size:0.5},catGridLine:{style:'none'},
-    showLegend:true,legendPos:'b',legendFontSize:10,
-  });
-}
-
-pres.writeFile({fileName: OUTPUT})
-  .then(() => { console.log('✅  PowerPoint guardado: ' + OUTPUT); })
-  .catch(e => { console.error('Error JS:', e); process.exit(1); });
-"""
-
-js_path = '/home/claude/_top_builder.js'
-with open(js_path, 'w', encoding='utf-8') as f:
-    f.write(JS_CODE)
-
-print('\n→ Construyendo PowerPoint con Node.js + pptxgenjs...')
-result = subprocess.run(['node', js_path], capture_output=True, text=True)
-if result.returncode != 0:
-    print('ERROR en Node.js:')
-    print(result.stderr)
-    sys.exit(1)
-print(result.stdout.strip())
-
-# Limpieza de archivos temporales
-os.remove(json_path)
-os.remove(js_path)
-
-print('\n' + '='*60)
-print(f'  ✅  LISTO  →  {OUTPUT_FILE}')
-print('='*60)
+if __name__ == '__main__':
+    print('='*60)
+    print('  PPTX Seguimiento TOP  v2.0  —  Iniciando...')
+    print('='*60)
+    d = cargar_datos()
+    print(f'  N={d["N"]}/{d["N_total"]} | {d["sust_top"]} | {NOMBRE_SERVICIO}')
+    build_pptx(d)
+    print(f'\n{"="*60}')
+    print(f'  ✅  LISTO  →  {OUTPUT_FILE}')
+    print(f'{"="*60}')
