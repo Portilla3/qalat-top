@@ -216,3 +216,142 @@ def run_all(wide_path, progress_cb=None):
             results[key] = {'ok': False, 'error': str(e)}
     if progress_cb: progress_cb(len(keys), len(keys), 'listo')
     return results
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DISTRIBUCIÓN POR CENTROS
+# ══════════════════════════════════════════════════════════════════════════════
+import zipfile, unicodedata as _ud
+
+def _slug(s):
+    """Convierte nombre de centro a nombre de carpeta seguro."""
+    s = _ud.normalize('NFD', str(s)).encode('ascii', 'ignore').decode()
+    s = re.sub(r'[^\w\s-]', '', s).strip()
+    s = re.sub(r'[\s]+', '_', s)
+    return s[:60]
+
+def _detectar_centros(wide_path):
+    """Lee la hoja 'Por Centro' del Wide y devuelve lista de centros (sin TOTAL)."""
+    import pandas as pd
+    try:
+        df = pd.read_excel(wide_path, sheet_name='Por Centro', header=2)
+        col = df.columns[0]
+        centros = [str(v).strip() for v in df[col].dropna()
+                   if str(v).strip().upper() != 'TOTAL' and str(v).strip() != '']
+        return centros
+    except Exception:
+        # Fallback: leer hoja Base Wide y detectar columna de centro
+        df = pd.read_excel(wide_path, sheet_name='Base Wide', header=1)
+        def _n(s): return _ud.normalize('NFD', str(s).lower()).encode('ascii','ignore').decode()
+        col_c = next((c for c in df.columns if any(k in _n(c) for k in
+                      ['codigo del centro','centro de tratamiento','servicio de tratamiento'])
+                      and 'trabajo' not in _n(c) and 'estudio' not in _n(c)), None)
+        if col_c:
+            return sorted(df[col_c].dropna().astype(str).str.strip().unique().tolist())
+        return []
+
+def _filtrar_wide_centro(wide_path, centro, out_path):
+    """
+    Genera un Excel Wide filtrado por centro.
+    Copia todas las hojas del Wide original pero filtra
+    la hoja 'Base Wide' al centro indicado.
+    """
+    import pandas as pd
+    from openpyxl import load_workbook
+    from openpyxl.utils.dataframe import dataframe_to_rows
+
+    wb_orig = load_workbook(wide_path)
+    wb_new  = load_workbook(wide_path)  # copia completa para mantener estilos
+
+    # Filtrar hoja Base Wide
+    ws = wb_new['Base Wide']
+    # Leer con pandas para filtrar
+    df = pd.read_excel(wide_path, sheet_name='Base Wide', header=1)
+    def _n(s): return _ud.normalize('NFD', str(s).lower()).encode('ascii','ignore').decode()
+    col_c = next((c for c in df.columns if any(k in _n(c) for k in
+                  ['codigo del centro','centro de tratamiento','servicio de tratamiento'])
+                  and 'trabajo' not in _n(c) and 'estudio' not in _n(c)), None)
+    if col_c:
+        df_f = df[df[col_c].astype(str).str.strip() == str(centro)].copy().reset_index(drop=True)
+    else:
+        df_f = df.copy()
+
+    # Reescribir hoja Base Wide con datos filtrados (manteniendo fila de encabezado original)
+    # Eliminar filas de datos (fila 3 en adelante) y reescribir
+    for row in ws.iter_rows(min_row=3, max_row=ws.max_row):
+        for cell in row:
+            cell.value = None
+
+    for r_idx, row in enumerate(dataframe_to_rows(df_f, index=False, header=False), start=3):
+        for c_idx, value in enumerate(row, start=1):
+            ws.cell(row=r_idx, column=c_idx, value=value)
+
+    wb_new.save(out_path)
+
+
+def run_paquetes_centros(wide_path, keys_sel=None, progress_cb=None):
+    """
+    Genera un ZIP maestro con una carpeta por centro.
+    Cada carpeta contiene:
+      - Base Wide filtrada (Excel)
+      - Los reportes seleccionados (Excel, Word, PPT)
+
+    Parámetros:
+      wide_path   : ruta al archivo Wide completo
+      keys_sel    : lista de script_keys a generar (None = todos)
+      progress_cb : callback(centro_actual, total_centros, paso_actual)
+
+    Retorna:
+      BytesIO con el ZIP maestro
+    """
+    if keys_sel is None:
+        keys_sel = list(OUTPUTS.keys())
+
+    centros = _detectar_centros(wide_path)
+    if not centros:
+        raise ValueError('No se detectaron centros en la base Wide.')
+
+    n_centros = len(centros)
+    zip_buf = BytesIO()
+
+    with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for i, centro in enumerate(centros):
+            slug = _slug(centro)
+            carpeta = f'{slug}/'
+
+            if progress_cb:
+                progress_cb(i, n_centros, centro)
+
+            # 1. Base Wide filtrada por centro
+            try:
+                fd_wide, wide_centro_path = tempfile.mkstemp(suffix='.xlsx', prefix='qalat_wide_')
+                os.close(fd_wide)
+                _filtrar_wide_centro(wide_path, centro, wide_centro_path)
+                with open(wide_centro_path, 'rb') as f:
+                    zf.writestr(f'{carpeta}BASE_Wide_{slug}.xlsx', f.read())
+            except Exception as e:
+                zf.writestr(f'{carpeta}ERROR_base_{slug}.txt', f'Error generando base: {e}')
+                wide_centro_path = wide_path  # fallback: usar wide completo
+            finally:
+                try: os.unlink(wide_centro_path)
+                except: pass
+
+            # 2. Reportes filtrados por centro
+            # Para reportes usamos wide_path completo + filtro_centro en run_script
+            for key in keys_sel:
+                out_fname, _ = OUTPUTS[key]
+                base_name = out_fname.rsplit('.', 1)[0]
+                ext       = out_fname.rsplit('.', 1)[1]
+                archivo_zip = f'{carpeta}{base_name}_{slug}.{ext}'
+                try:
+                    buf, _, _ = run_script(key, wide_path, filtro_centro=centro)
+                    zf.writestr(archivo_zip, buf.getvalue())
+                except Exception as e:
+                    zf.writestr(f'{carpeta}ERROR_{key}_{slug}.txt',
+                                f'Error generando {out_fname}: {e}')
+
+    if progress_cb:
+        progress_cb(n_centros, n_centros, 'listo')
+
+    zip_buf.seek(0)
+    return zip_buf
