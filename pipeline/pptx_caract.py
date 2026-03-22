@@ -173,7 +173,14 @@ def _es_positivo(valor):
 
 # ── Carga y cálculo de datos ──────────────────────────────────────────────────
 def cargar_datos():
-    global NOMBRE_SERVICIO, PERIODO
+    global NOMBRE_SERVICIO, PERIODO, INPUT_FILE, OUTPUT_FILE, FILTRO_CENTRO
+    # Leer de variables de entorno si fueron inyectadas por el runner
+    if INPUT_FILE is None:
+        INPUT_FILE = os.environ.get('QALAT_WIDE') or auto_archivo_wide()
+    if OUTPUT_FILE is None:
+        OUTPUT_FILE = os.environ.get('QALAT_OUT', '/home/claude/TOP_Presentacion_Caracterizacion.pptx')
+    if FILTRO_CENTRO is None:
+        FILTRO_CENTRO = os.environ.get('QALAT_CENTRO') or None
     _pais = _detectar_pais(INPUT_FILE)
     NOMBRE_SERVICIO = _pais if _pais else 'Servicio de Tratamiento'
 
@@ -557,16 +564,4 @@ def build_pptx(d):
     footer(sl, pie_txt)
 
     prs.save(OUTPUT_FILE)
-    print(f'  ✓ PPT generado: {OUTPUT_FILE}')
-
-# ══════════════════════════════════════════════════════════════════════════════
-if __name__ == '__main__':
-    print('='*60)
-    print('  PPTX Caracterización TOP  v2.0  —  Iniciando...')
-    print('='*60)
-    d = cargar_datos()
-    print(f'  N={d["N"]} | {d["sust_top1"]} {d["sust_top1_pct"]}% | {NOMBRE_SERVICIO}')
-    build_pptx(d)
-    print(f'\n{"="*60}')
-    print(f'  ✅  LISTO  →  {OUTPUT_FILE}')
-    print(f'{"="*60}')
+    print(f'  ✓ PPT generado: {OUTPUT_F
