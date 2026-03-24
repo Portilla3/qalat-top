@@ -233,7 +233,8 @@ if uploaded:
         except Exception as e:
             st.error(f'❌ Error: {e}')
         finally:
-            os.unlink(tmp_raw)
+            # Guardar raw_path para uso en paquetes por centro
+            st.session_state['raw_path'] = tmp_raw
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RESULTADOS
@@ -487,7 +488,8 @@ if 'result' in st.session_state:
                     zip_buf = run_paquetes_centros(
                         wide_path_dist,
                         keys_sel=keys_dist,
-                        progress_cb=_cb
+                        progress_cb=_cb,
+                        raw_input_path=st.session_state.get('raw_path')
                     )
 
                 today_str = datetime.now().strftime('%Y-%m-%d')
